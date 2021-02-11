@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devops-capstone
+  labels:
+    app: devops-capstone
+  namespace: default
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: devops-capstone
+  template:
+    metadata:
+      labels:
+        app: devops-capstone
+    spec:
+      containers:
+        - name: devops-capstone
+          image: chaitra2090/devops-capstone
+          ports:
+            - containerPort: 81
+          env:
+            - name: NEWS_API_KEY
+              value: $$NEWS_API_KEY
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: devops-capstone
+  labels:
+    app: devops-capstone
+spec:
+  type: LoadBalancer
+  selector:
+    app: devops-capstone
+  ports:
+    - protocol: TCP
+      port: 81
+      targetPort: 81
+      nodePort: 30007

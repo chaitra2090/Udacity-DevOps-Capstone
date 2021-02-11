@@ -1,0 +1,125 @@
+version: 2.1
+
+jobs:
+  build-newspie:
+    docker:
+        - image: python:3.7-alpine3.11
+          auth:
+            username: chaitra2090
+            password: $DOCKERHUB_PASSWORD
+    steps:
+      - checkout
+      - setup_remote_docker:
+          version: 19.03.13
+      - restore_cache:
+          keys:
+            - v1-dependencies-{{ checksum "newspie/requirements.txt" }}
+            - v1-dependencies-
+      - run:
+          name: Install dependencies
+          command: |
+            python3 -m venv venv
+            . venv/bin/activate
+            apk update
+            apk add --no-cache bash
+            apk add build-base
+            apk add --update docker openrc
+            make install
+      - save_cache:
+          paths:
+            - ./venv
+          key: v1-dependencies-{{ checksum "newspie/requirements.txt" }}
+
+      - run:
+          name: Install hadolint
+          command: |
+            . venv/bin/activate
+            wget -O /bin/hadolint https://github.com/hadolint/hadolint/releases/download/v1.16.3/hadolint-Linux-x86_64 &&\
+            chmod +x /bin/hadolint
+
+      - run:
+          name: run lint
+          command: |
+            . venv/bin/activate
+            make lint
+
+      - run:
+          name: build docker container
+          command: |
+            . venv/bin/activate
+            docker build --tag=devops-capstone .
+
+      - run:
+          name: list docker image
+          command: |
+            . venv/bin/activate
+            docker image ls
+
+      - run:
+          name: tag docker build
+          command: |
+            . venv/bin/activate
+            dockerpath=chaitra2090/devops-capstone
+            docker tag devops-capstone:latest $dockerpath:latest
+
+      - run:
+          name: upload docker build to registry
+          command: |
+            . venv/bin/activate
+            docker login --username chaitra2090 --password $DOCKERHUB_PASSWORD
+            docker push chaitra2090/devops-capstone:latest
+
+  kube-update:
+    docker:
+      - image: python:3.7-alpine3.11
+    steps:
+      - checkout
+      - add_ssh_keys:
+          fingerprints:
+            - "ac:40:5d:11:02:0d:87:89:d7:f9:97:2b:8e:af:8e:dd"
+
+      - run:
+          name: Install packages
+          command: |
+            apk add curl
+            apk add --no-cache python3 py3-pip
+            pip3 install --upgrade pip
+            pip3 install awscli
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl
+
+      - run:
+          name: Update kube cluster
+          command: |
+            aws eks --region us-west-2 update-kubeconfig --name devops-capstone
+
+      - run:
+          name: Select kube cluster
+          command: |
+            /root/project/kubectl config use-context arn:aws:eks:us-west-2:843893218511:cluster/devops-capstone
+
+      - run:
+          name: Apply deployment and run service
+          command: |
+            cat kube_scripts/deployment.yml | sed s/\$\$NEWS_API_KEY/$NEWS_API_KEY/ | /root/project/kubectl apply -f -
+
+      - run:
+          name: Set docker image to the kube cluster
+          command: |
+            /root/project/kubectl set image deployments/devops-capstone devops-capstone=chaitra2090/devops-capstone:latest
+
+      - run:
+          name: Echo kube cluster info and LB's public DNS
+          command: |
+            /root/project/kubectl get deployment
+            /root/project/kubectl describe deployments
+            /root/project/kubectl get nodes
+            /root/project/kubectl get pods
+            /root/project/kubectl get service/devops-capstone
+
+workflows:
+  default:
+    jobs:
+      - build-newspie
+      - kube-update:
+          requires: [build-newspie]
