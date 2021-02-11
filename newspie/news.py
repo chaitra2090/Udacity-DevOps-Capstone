@@ -43,7 +43,7 @@ def root():
 
 
 @APP.errorhandler(404)
-def page_not_found(_error):
+def page_not_found(error):
     ''' Not existing pages redirect to the first page of general category. '''
     return redirect(url_for('category', category='general', page=1))
 
